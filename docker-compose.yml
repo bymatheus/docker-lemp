@@ -1,0 +1,135 @@
+version: '3.8'
+
+# Docker Networks
+networks:
+    project:
+        driver: ${NETWORKS_DRIVER}
+
+# Volumes
+volumes:
+    dbData:
+        driver: ${VOLUMES_DRIVER}
+        name: ${APP_NAME}-database
+
+    redisData:
+        driver: ${VOLUMES_DRIVER}
+        name: ${APP_NAME}-redis
+
+# Workflow
+services:
+    nginx:
+        build:
+            context: ./nginx
+        container_name: ${APP_NAME}-nginx
+        ports:
+            - "80:80"
+        volumes:
+            - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}${APP_CODE_CONTAINER_FLAG}
+        depends_on:
+            - php
+            - database
+        networks:
+            - project
+
+    database:
+        platform: linux/x86_64
+        image: mariadb:11.2
+        container_name: ${APP_NAME}-database
+        restart: always
+        env_file:
+            - .env
+        environment:
+            MYSQL_DATABASE: "${MDB_DATABASE}"
+            MYSQL_USER: "${MDB_USERNAME}"
+            MYSQL_PASSWORD: "${MDB_PASSWORD}"
+            MYSQL_ROOT_PASSWORD: "${MDB_ROOT_PASSWORD}"
+        ports:
+            - "3306:3306"
+        volumes:
+            - dbData:/var/lib/mysql/
+        networks:
+            - project
+
+    redis:
+        image: redis:alpine
+        container_name: ${APP_NAME}-redis
+        restart: unless-stopped
+        ports:
+            - "6378:6379"
+        volumes:
+            - redisData:/data
+        networks:
+            - project
+
+    adminer:
+        platform: linux/x86_64
+        image: adminer
+        container_name: ${APP_NAME}-adminer
+        ports:
+            - "8080:8080"
+        depends_on:
+            - database
+        networks:
+            - project
+
+    php:
+        build:
+            context: ./php
+            args:
+                - PHP_MAIN_VERSION=${PHP_VERSION}
+                - PHP_MAIN_INTERPRETER=${PHP_INTERPRETER}
+                - PATH_CONTAINER=${APP_CODE_PATH_CONTAINER}
+        container_name: ${APP_NAME}-php
+        volumes:
+            - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}${APP_CODE_CONTAINER_FLAG}
+        ports:
+            - "9000:9000"
+        networks:
+            - project
+
+    composer:
+        build:
+            context: ./php/composer
+            args:
+                - PHP_MAIN_VERSION=${PHP_VERSION}
+                - PHP_MAIN_INTERPRETER=${PHP_INTERPRETER}
+                - PATH_CONTAINER=${APP_CODE_PATH_CONTAINER}
+        container_name: ${APP_NAME}-composer
+        volumes:
+        - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+        working_dir: ${APP_CODE_PATH_CONTAINER}
+        depends_on:
+            - php
+        user: laravel
+        networks:
+            - project
+        entrypoint: ['composer']
+
+    npm:
+        image: node:14.15.0
+        container_name: ${APP_NAME}-npm
+        volumes:
+            - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+        working_dir: ${APP_CODE_PATH_CONTAINER}
+        entrypoint: ['npm']
+        networks:
+            - project
+
+    artisan:
+        build:
+            context: ./php
+            args:
+                - PHP_MAIN_VERSION=${PHP_VERSION}
+                - PHP_MAIN_INTERPRETER=${PHP_INTERPRETER}
+                - PATH_CONTAINER=${APP_CODE_PATH_CONTAINER}
+        container_name: ${APP_NAME}-artisan
+        volumes:
+            - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}${APP_CODE_CONTAINER_FLAG}
+        depends_on:
+            - database
+            - redis
+        working_dir: ${APP_CODE_PATH_CONTAINER}
+        user: laravel
+        entrypoint: ['php', '${APP_CODE_PATH_CONTAINER}/artisan']
+        networks:
+            - project
